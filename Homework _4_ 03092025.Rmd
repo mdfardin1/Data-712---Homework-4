@@ -1,0 +1,186 @@
+---
+title: "Homework 4"
+author: "MD Fardin"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+### Getting Started:
+
+```{r}
+# Start Session
+rm(list = ls())
+gc()
+```
+
+```{r include=FALSE}
+# Setting the Working Directory
+setwd("F:/Graduate School Files/Data 712- Advance Analytics/NHANES Dataset 082021-082023")
+```
+
+```{r}
+# Load Packages
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(sf)
+library(sp)
+library(tidyr)
+library(tidyverse)
+library(descr) 
+library(leaflet)
+library(ggthemes)
+library(writexl)
+library(readr)
+library(haven)
+library(leaflet)
+library(knitr)
+library(car)  # For VIF
+library(MASS) # For AIC and BIC
+library(lmtest) # For Likelihood Ratio Test
+```
+
+### Reading Assignment:
+
+Including interaction terms in logit regression models presents several challenges that can lead to misinterpretation if not properly addressed. Unlike in linear models, where interaction effects are straightforward, the interaction coefficient in a logit model does not directly represent the marginal effect of the interaction term. Instead, the actual interaction effect depends on all other covariates in the model and can even have the opposite sign of the coefficient itself. This means that standard statistical software often reports misleading results, as it calculates only the marginal effect of the interaction term rather than the true interaction effect on the probability scale. Additionally, the statistical significance of interaction terms cannot be determined using simple t-tests because the effect varies across observations. Since interaction effects in nonlinear models follow an S-shaped pattern, their impact is strongest for some predicted probability ranges (such as around 0.5) and weakest at extreme values close to 0 or 1. Consequently, failing to account for these complexities can lead to incorrect conclusions about the relationship between interacting variables.
+
+A simulation-based approach offers a more accurate and intuitive way to interpret interaction effects in logit models. Instead of relying on raw coefficients, simulations calculate differences in predicted probabilities associated with changes in key independent variables. This approach allows researchers to visualize the interaction effect across different values of the covariates, revealing nonlinearities and variations in statistical significance. Furthermore, simulations generate confidence intervals for interaction effects, providing a more precise measure of uncertainty than traditional methods. By incorporating estimation uncertainty, the simulation-based approach ensures that results are robust and correctly interpreted. It also translates complex statistical outputs into meaningful, real-world interpretations, making findings more accessible to researchers and policymakers. Overall, using simulations to analyze interaction effects in logit models, as recommended by Ai and Norton (2003), Zelner (2009), and King et al. (2000), improves accuracy, enhances visualization, and facilitates clearer communication of statistical relationships.
+
+### Citations:
+
+Ai, C., Norton, E. C., University of Florida, & Department of Health Policy and Administration, University of North Carolina. (2003). Interaction terms in logit and probit models. In *Economics Letters* (Vol. 80, pp. 123–129). Elsevier Science B.V.
+
+King, G., Tomz, M., Wittenberg, J., & Harvard University. (2000). Making the most of statistical analyses: improving interpretation and presentation. In Midwest Political Science Association, *American Journal of Political Science* (Vol. 44, Issue 2, pp. 341–355).
+
+Zelner, B. A. (2009). Using simulation to interpret results from logit, probit, and other nonlinear models. *Strategic Management Journal*, *30*(12), 1335–1348. <https://doi.org/10.1002/smj.783>
+
+### Data Analysis Assignment
+
+The dataset used for this analysis comes from the National Health and Nutrition Examination Survey (NHANES), specifically from the August 2021–August 2023 data collection cycle. NHANES is a nationally representative survey conducted by the Centers for Disease Control and Prevention (CDC), designed to assess the health and nutritional status of adults and children in the United States. It combines interviews, physical examinations, and laboratory tests to provide comprehensive health-related data. The NHANES dataset is widely used in public health research to examine relationships between demographic, socioeconomic, behavioral, and health outcomes.
+
+For this analysis, we used three specific NHANES data files:
+
+1.   **ALQ_L (Alcohol Use Data)** – Contains self-reported responses about alcohol consumption habits, including whether an individual has ever consumed alcohol (ALQ111), how frequently they drink, and binge drinking patterns​.
+
+2.   **INQ_L (Income Data)** – Provides information about family income levels, including the income-to-poverty ratio (INDFMPIR), which helps classify participants based on economic status.
+
+3.   **DEMO_L (Demographics Data)** – Includes key demographic variables such as age (RIDAGEYR), gender (RIAGENDR), race/ethnicity, marital status, and education level​.
+
+These datasets were merged using the **SEQN (Respondent Sequence Number)**, a unique identifier for each participant. The goal of this analysis was to investigate how demographic and socioeconomic factors influence the likelihood of an individual having ever consumed alcohol, using logistic regression modeling.
+
+```{r}
+# NHANES August 2021 – August 2023 Dataset
+Demo <- read_xlsx("DEMO_L.xlsx")
+Income <- read_xlsx("INQ_L.xlsx")
+Alcohol <- read_xlsx("ALQ_L.xlsx")
+```
+
+```{r}
+# Variable names
+names(c(Demo, Income, Alcohol))
+```
+
+```{r}
+# Merge datasets on SEQN (Respondent ID)
+data <- Alcohol %>%
+  inner_join(Income, by = "SEQN") %>%
+  inner_join(Demo, by = "SEQN")
+
+# Print column names to check for exact matches
+print(colnames(data))
+
+# Ensure the correct column names are used in select()
+selected_columns <- c("ALQ111", "RIAGENDR", "RIDAGEYR", "INDFMPIR")
+
+# Check if all selected columns exist in the dataset
+missing_cols <- setdiff(selected_columns, colnames(data))
+if (length(missing_cols) > 0) {
+  stop(paste("Missing columns in dataset:", paste(missing_cols, collapse = ", ")))
+}
+
+# Recode ALQ111 (Ever had a drink of any kind of alcohol)
+data <- data %>%
+  mutate(ALQ111 = ifelse(ALQ111 == 2, 0, 1))  # Recode No (2) as 0
+
+# Select only relevant independent variables manually
+data <- data[, selected_columns] %>% na.omit()  # Remove missing values
+
+# Convert categorical variables to factors
+data$RIAGENDR <- as.factor(data$RIAGENDR)
+```
+
+```{r}
+# Model 1: Simple Logistic Regression with Gender
+model1 <- glm(ALQ111 ~ RIAGENDR, data = data, family = binomial)
+
+# Model 2: Add Age
+model2 <- glm(ALQ111 ~ RIAGENDR + RIDAGEYR, data = data, family = binomial)
+
+# Model 3: Add Income (Full Model)
+model3 <- glm(ALQ111 ~ RIAGENDR + RIDAGEYR + INDFMPIR, data = data, family = binomial)
+
+# Model Comparison
+summary(model1)
+summary(model2)
+summary(model3)
+```
+
+```{r}
+# Variance Inflation Factor (VIF) for Multicollinearity Check
+vif_model3 <- vif(model3)
+
+# Likelihood Ratio Test (LRT) to compare models
+lr_test_1_2 <- lrtest(model1, model2)  # Compare Model 1 vs Model 2
+lr_test_2_3 <- lrtest(model2, model3)  # Compare Model 2 vs Model 3
+
+# AIC and BIC for model selection
+aic_values <- AIC(model1, model2, model3)
+bic_values <- BIC(model1, model2, model3)
+```
+
+```{r}
+# Display Results
+print("Likelihood Ratio Test (Model 1 vs Model 2):")
+print(lr_test_1_2)
+
+print("Likelihood Ratio Test (Model 2 vs Model 3):")
+print(lr_test_2_3)
+
+print("AIC Values for Model Comparison:")
+print(aic_values)
+
+print("BIC Values for Model Comparison:")
+print(bic_values)
+
+print("Variance Inflation Factor (VIF) for Model 3:")
+print(vif_model3)
+```
+
+```{r}
+# Odds Ratio Calculation
+odds_ratios <- exp(coef(model3))  # Convert log-odds to odds ratio
+print("Odds Ratios for Model 3:")
+print(odds_ratios)
+```
+
+```{r}
+# Plot Predicted Probabilities
+data$predicted <- predict(model3, type = "response")
+
+ggplot(data, aes(x = RIDAGEYR, y = predicted, color = RIAGENDR)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = FALSE) +
+  labs(title = "Predicted Probability of Having Ever Consumed Alcohol",
+       x = "Age", y = "Predicted Probability") +
+  theme_minimal()
+```
+
+My R script performs a logistic regression analysis to predict whether an individual has ever consumed alcohol, based on demographic and income variables from the NHANES dataset. I begin by loading the necessary libraries (`dplyr`, `ggplot2`, `car`, `MASS`, `lmtest`, `readxl`), which are essential for data manipulation, visualization, multicollinearity checks, and model comparison. The three datasets—Income, Alcohol Use, and Demography are read into R and assigned to the variables Income, Alcohol, and Demo for easier reference. I merge these datasets using the SEQN (Respondent ID) column to ensure that all participant data aligns correctly. To prevent errors later in the script, I print column names (`print(colnames(data))`) to confirm the presence of key variables before proceeding. Additionally, I implement a column existence check (`setdiff()`) to verify that the required variables (`ALQ111`, `RIAGENDR`, `RIDAGEYR`, `INDFMPIR`) exist in the dataset. If any of these variables are missing, the script automatically stops execution and displays an error message to prompt correction.
+
+I then prepare the dataset for logistic regression by recoding and selecting relevant variables. The `ALQ111` variable, which indicates whether a participant has ever consumed alcohol, is recoded to a binary format (`1 = Yes, 0 = No`), ensuring compatibility with the logistic regression model. To maintain only the most relevant predictors, I manually select `RIAGENDR` (gender), `RIDAGEYR` (age), and `INDFMPIR` (income-to-poverty ratio) while removing missing values (`na.omit()`) to ensure a clean dataset. Since `RIAGENDR` is categorical, I convert it into a factor variable to allow proper interpretation in the model. I then construct three logistic regression models with increasing complexity: Model 1 includes only gender as a predictor, Model 2 adds age, and Model 3 (the full model) further incorporates income. This stepwise modeling approach allows me to assess how additional variables improve the model’s ability to predict alcohol consumption.
+
+To evaluate model performance, I apply several statistical tests and model selection criteria. Likelihood Ratio Tests (LRT) compare nested models (`model1 vs. model2`, `model2 vs. model3`) to determine whether adding predictors significantly improves model fit. Additionally, I calculate Akaike Information Criterion (AIC) and Bayesian Information Criterion (BIC) values for each model, selecting the model with the lowest values as the best fit. Since multicollinearity can distort regression results, I check for it using the Variance Inflation Factor (VIF) to ensure that independent variables are not highly correlated. Finally, I compute odds ratios (`exp(coef(model3))`) to translate log-odds into more interpretable probability ratios. To visually represent the model’s predictions, I create a ggplot2 visualization of the predicted probability of alcohol consumption across different age groups and genders. This combination of statistical tests, model selection criteria, and graphical interpretation ensures that my analysis is both rigorous and easy to interpret.
+
+Based on the LRT results, AIC/BIC values, and VIF checks, I determine the best model for predicting alcohol consumption. Model 3 (`ALQ111 ~ RIAGENDR + RIDAGEYR + INDFMPIR`) is selected as the best model because it has the lowest AIC and BIC values, meaning it balances predictive accuracy with model complexity. Additionally, the LRT confirms that adding age and income significantly improves model performance, meaning these variables provide valuable predictive power. Finally, VIF values are below 5, indicating that multicollinearity is not a concern, and each predictor contributes meaningful and independent information. Therefore, Model 3 is the most reliable and interpretable choice for predicting whether an individual has ever consumed alcohol, highlighting how gender, age, and income levels influence alcohol consumption trends.
+
+### Programming Assignment
